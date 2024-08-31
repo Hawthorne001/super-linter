@@ -73,6 +73,7 @@ function BuildFileList() {
         -not \( -path '*/\__pycache__' -prune \) \
         -not \( -path '*/\node_modules' -prune \) \
         -not -name ".DS_Store" \
+        -not -name "*.avif" \
         -not -name "*.gif" \
         -not -name "*.ico" \
         -not -name "*.jpg" \
@@ -130,7 +131,7 @@ function BuildFileList() {
   fi
 
   local PARALLEL_RESULTS_FILE_PATH
-  PARALLEL_RESULTS_FILE_PATH="/tmp/super-linter-parallel-results-build-file-list.json"
+  PARALLEL_RESULTS_FILE_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-parallel-results-build-file-list.json"
   debug "PARALLEL_RESULTS_FILE_PATH when building the file list: ${PARALLEL_RESULTS_FILE_PATH}"
 
   local -a PARALLEL_COMMAND
@@ -147,7 +148,8 @@ function BuildFileList() {
   PARALLEL_COMMAND+=("BuildFileArrays")
   debug "PARALLEL_COMMAND to build the list of files and directories to lint: ${PARALLEL_COMMAND[*]}"
 
-  FILE_ARRAYS_DIRECTORY_PATH="$(mktemp -d)"
+  FILE_ARRAYS_DIRECTORY_PATH="${SUPER_LINTER_PRIVATE_OUTPUT_DIRECTORY_PATH}/super-linter-file-arrays"
+  mkdir -p "${FILE_ARRAYS_DIRECTORY_PATH}"
   export FILE_ARRAYS_DIRECTORY_PATH
   debug "Created FILE_ARRAYS_DIRECTORY_PATH: ${FILE_ARRAYS_DIRECTORY_PATH}"
 
@@ -205,9 +207,6 @@ BuildFileArrays() {
   debug "Categorizing the following files: ${RAW_FILE_ARRAY[*]}"
   debug "FILTER_REGEX_INCLUDE: ${FILTER_REGEX_INCLUDE}, FILTER_REGEX_EXCLUDE: ${FILTER_REGEX_EXCLUDE}, TEST_CASE_RUN: ${TEST_CASE_RUN}"
 
-  ValidateBooleanVariable "IGNORE_GENERATED_FILES" "${IGNORE_GENERATED_FILES}"
-  ValidateBooleanVariable "IGNORE_GITIGNORED_FILES" "${IGNORE_GITIGNORED_FILES}"
-
   for FILE in "${RAW_FILE_ARRAY[@]}"; do
     # Get the file extension
     FILE_TYPE="$(GetFileExtension "$FILE")"
@@ -246,7 +245,13 @@ BuildFileArrays() {
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSCPD"
       fi
 
-      # No need to process this item furhter
+      # Handle the corner case where FILE=${GITHUB_WORKSPACE}, and the user set
+      # ANSIBLE_DIRECTORY=. or ANSIBLE_DIRECTORY=/
+      if IsAnsibleDirectory "${FILE}"; then
+        echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-ANSIBLE"
+      fi
+
+      debug "No need to further process ${FILE}"
       continue
     fi
 
@@ -293,7 +298,7 @@ BuildFileArrays() {
 
     echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITLEAKS"
 
-    if [[ ("${FILE}" =~ .*${ANSIBLE_DIRECTORY}.*) ]] && [[ -d "${FILE}" ]]; then
+    if IsAnsibleDirectory "${FILE}"; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-ANSIBLE"
     fi
 
@@ -338,11 +343,11 @@ BuildFileArrays() {
     elif [ "${FILE_TYPE}" == "coffee" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-COFFEESCRIPT"
     elif [ "${FILE_TYPE}" == "cs" ]; then
-      FILE_ARRAY_CSHARP+=("${FILE}")
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-CSHARP"
     elif [ "${FILE_TYPE}" == "css" ] || [ "${FILE_TYPE}" == "scss" ] ||
       [ "${FILE_TYPE}" == "sass" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-CSS"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-CSS_PRETTIER"
     elif [ "${FILE_TYPE}" == "dart" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-DART"
     # Use BASE_FILE here because FILE_TYPE is not reliable when there is no file extension
@@ -398,6 +403,7 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GROOVY"
     elif [ "${FILE_TYPE}" == "html" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-HTML"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-HTML_PRETTIER"
     elif [ "${FILE_TYPE}" == "java" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JAVA"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GOOGLE_JAVA_FORMAT"
@@ -407,9 +413,10 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JAVASCRIPT_PRETTIER"
     elif [ "$FILE_TYPE" == "jsonc" ] || [ "$FILE_TYPE" == "json5" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSONC"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSONC_PRETTIER"
     elif [ "${FILE_TYPE}" == "json" ]; then
-      FILE_ARRAY_JSON+=("${FILE}")
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSON"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSON_PRETTIER"
       if DetectOpenAPIFile "${FILE}"; then
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-OPENAPI"
       fi
@@ -427,6 +434,7 @@ BuildFileArrays() {
       fi
     elif [ "${FILE_TYPE}" == "jsx" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSX"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-JSX_PRETTIER"
     elif [ "${FILE_TYPE}" == "kt" ] || [ "${FILE_TYPE}" == "kts" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-KOTLIN"
     elif [ "$FILE_TYPE" == "lua" ]; then
@@ -435,6 +443,7 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-LATEX"
     elif [ "${FILE_TYPE}" == "md" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-MARKDOWN"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-MARKDOWN_PRETTIER"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-NATURAL_LANGUAGE"
     elif [ "${FILE_TYPE}" == "php" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PHP_BUILTIN"
@@ -460,6 +469,7 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_ISORT"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_PYLINT"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_MYPY"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_PYINK"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-PYTHON_RUFF"
     elif [ "${FILE_TYPE}" == "raku" ] || [ "${FILE_TYPE}" == "rakumod" ] ||
       [ "${FILE_TYPE}" == "rakutest" ] || [ "${FILE_TYPE}" == "pm6" ] ||
@@ -481,7 +491,6 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SNAKEMAKE_LINT"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SNAKEMAKE_SNAKEFMT"
     elif [ "${FILE_TYPE}" == "sql" ]; then
-      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SQL"
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-SQLFLUFF"
     elif [ "${FILE_TYPE}" == "tf" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-TERRAFORM_TFLINT"
@@ -506,8 +515,17 @@ BuildFileArrays() {
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-XML"
     elif [[ "${FILE}" =~ .?goreleaser.+ya?ml ]]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GO_RELEASER"
+    elif [ "${FILE_TYPE}" == "graphql" ]; then
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GRAPHQL_PRETTIER"
+    elif [ "${FILE_TYPE}" == "vue" ]; then
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-VUE_PRETTIER"
+    elif [ "${FILE_TYPE}" == "sln" ]; then
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-DOTNET_SLN_FORMAT_ANALYZERS"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-DOTNET_SLN_FORMAT_STYLE"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-DOTNET_SLN_FORMAT_WHITESPACE"
     elif [ "${FILE_TYPE}" == "yml" ] || [ "${FILE_TYPE}" == "yaml" ]; then
       echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-YAML"
+      echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-YAML_PRETTIER"
       if DetectActions "${FILE}"; then
         echo "${FILE}" >>"${FILE_ARRAYS_DIRECTORY_PATH}/file-array-GITHUB_ACTIONS"
       fi
